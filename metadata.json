@@ -1,0 +1,5 @@
+{
+  "name": "Rook Lite",
+  "description": "An autonomous marketing intelligence assistant acting as a browser-based CMO to analyze and optimize landing pages, ad copy, and strategy using Gemini 3 Pro.",
+  "requestFramePermissions": []
+}
