@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { SYSTEM_INSTRUCTION_BASE } from "../constants";
 import { AnalysisResult, AppMode } from "../types";
 
@@ -252,7 +252,7 @@ const compareSchema: Schema = {
 
 export const analyzeMarketingContent = async (
   mode: AppMode,
-  inputs: { a: string, b: string }
+  inputs: { a: string, b: string, image?: string, video?: string }
 ): Promise<AnalysisResult> => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
@@ -267,12 +267,16 @@ export const analyzeMarketingContent = async (
   if (mode === 'audit') {
     prompt = `Perform a deep conversion audit on the following landing page content.
     INPUT: "${inputs.a}"
+    ${inputs.image ? "NOTE: An image of the landing page or ad has been provided. Analyze its visual hierarchy, design trust signals, and alignment with the copy." : ""}
+    ${inputs.video ? "NOTE: A video of the landing page or user flow has been provided. Analyze the user experience, motion design, and video content effectiveness." : ""}
     Provide strategic reasoning, find gaps (with severity), rewrite copy, and suggest ads.
     If the input contains URLs, use Google Search to gather context about the brand if needed.`;
     schema = auditSchema;
   } else if (mode === 'idea') {
     prompt = `Act as a GTM strategist. I have a product idea but no website.
     IDEA INPUT: "${inputs.a}"
+    ${inputs.image ? "NOTE: A sketch or visual reference for the idea has been provided. Use it to inform the landing page structure and visual direction." : ""}
+    ${inputs.video ? "NOTE: A video explaining the idea or a prototype demo has been provided. Use the video details to refine the ICP and feature positioning." : ""}
     Create an opportunity scan, ICP, positioning, landing page structure, channel strategy, and launch plan.
     Use Google Search to validate market trends if specific industries are mentioned.`;
     schema = ideaSchema;
@@ -281,6 +285,8 @@ export const analyzeMarketingContent = async (
     
     VARIANT A (My Product): "${inputs.a}"
     VARIANT B (Competitor(s)): "${inputs.b}"
+    ${inputs.image ? "NOTE: An image of Variant A (or a competitor) has been provided. Factor visual design into the scoreboard and differences analysis." : ""}
+    ${inputs.video ? "NOTE: A video of Variant A (or a competitor) has been provided. Factor video engagement and production quality into the scoreboard." : ""}
     
     NOTE: Variant B may contain multiple competitors. Analyze them as a group or the strongest among them.
     
@@ -292,19 +298,51 @@ export const analyzeMarketingContent = async (
     schema = compareSchema;
   }
 
+  const parts: any[] = [];
+  
+  if (inputs.image) {
+      // Inputs.image is expected to be a data URL (e.g. data:image/png;base64,...)
+      const match = inputs.image.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+      if (match) {
+          parts.push({
+              inlineData: {
+                  mimeType: match[1],
+                  data: match[2]
+              }
+          });
+      }
+  }
+
+  if (inputs.video) {
+      // Inputs.video is expected to be a data URL
+      const match = inputs.video.match(/^data:(video\/[a-z0-9]+);base64,(.+)$/);
+      if (match) {
+          parts.push({
+              inlineData: {
+                  mimeType: match[1],
+                  data: match[2]
+              }
+          });
+      }
+  }
+
+  parts.push({ text: prompt });
+
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
     contents: [
       {
         role: "user",
-        parts: [{ text: prompt }],
+        parts: parts,
       },
     ],
     config: {
       systemInstruction: SYSTEM_INSTRUCTION_BASE,
       responseMimeType: "application/json",
       responseSchema: schema,
-      tools: [{ googleSearch: {} }]
+      tools: [{ googleSearch: {} }],
+      // Enable thinking mode for complex reasoning
+      thinkingConfig: { thinkingBudget: 32768 } 
     },
   });
 
@@ -319,3 +357,66 @@ export const analyzeMarketingContent = async (
     throw new Error("Analysis failed: Invalid response format.");
   }
 };
+
+export const generateStrategyAudio = async (text: string): Promise<string> => {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error("API_KEY is missing.");
+    }
+  
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: `Generate an enthusiastic, executive-level audio brief summarizing this strategy: ${text}` }] }],
+        config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+                voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: 'Kore' },
+                },
+            },
+        },
+    });
+
+    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!audioData) {
+        throw new Error("Failed to generate audio.");
+    }
+    
+    return audioData;
+}
+
+export const transcribeAudio = async (base64Audio: string, mimeType: string): Promise<string> => {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+        throw new Error("API_KEY is missing.");
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Extract base64 if it comes with prefix, though usually passed raw or clean
+    const cleanBase64 = base64Audio.includes('base64,') 
+        ? base64Audio.split('base64,')[1] 
+        : base64Audio;
+
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+            {
+                role: "user",
+                parts: [
+                    {
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: cleanBase64
+                        }
+                    },
+                    { text: "Transcribe this audio clearly and accurately. Do not add any commentary, just return the text spoken." }
+                ]
+            }
+        ]
+    });
+
+    return response.text || "";
+}

@@ -24,7 +24,7 @@ const RookLogo = () => (
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('audit');
-  const [inputs, setInputs] = useState({ a: '', b: '' });
+  const [inputs, setInputs] = useState<{ a: string; b: string; image?: string; video?: string }>({ a: '', b: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +46,7 @@ const App: React.FC = () => {
   }, []);
 
   // Save history handler
-  const saveToHistory = (result: AnalysisResult, currentInputs: { a: string, b: string }) => {
+  const saveToHistory = (result: AnalysisResult, currentInputs: { a: string, b: string, image?: string, video?: string }) => {
       const newItem: SavedAnalysis = {
           id: Date.now().toString(),
           timestamp: Date.now(),

@@ -142,7 +142,7 @@ export interface SavedAnalysis {
   mode: AppMode;
   title: string;
   summary: string;
-  inputs: { a: string; b: string }; // 'a' is main input, 'b' is variant B for compare
+  inputs: { a: string; b: string; image?: string; video?: string }; // Added video
   result: AnalysisResult;
 }
 

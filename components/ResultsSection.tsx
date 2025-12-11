@@ -1,15 +1,46 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AnalysisResult, AuditResult, IdeaResult, CompareResult } from '../types';
 import { AnalysisCard } from './AnalysisCard';
+import { generateStrategyAudio } from '../services/geminiService';
 import { 
   Target, Search, Megaphone, Share2, Mail, Swords, Lightbulb, 
   ArrowRight, TrendingUp, AlertTriangle, FileText, Layout, 
   Compass, Map, Trophy, ArrowUpRight, CheckCircle2, XCircle,
-  BarChart3, Globe, BrainCircuit
+  BarChart3, Globe, BrainCircuit, PlayCircle, StopCircle, Loader2
 } from 'lucide-react';
 
 interface ResultsSectionProps {
   data: AnalysisResult;
+}
+
+// --- AUDIO HELPERS ---
+function decode(base64: string) {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  }
+  
+async function decodeAudioData(
+    data: Uint8Array,
+    ctx: AudioContext,
+    sampleRate: number,
+    numChannels: number,
+  ): Promise<AudioBuffer> {
+    const dataInt16 = new Int16Array(data.buffer);
+    const frameCount = dataInt16.length / numChannels;
+    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  
+    for (let channel = 0; channel < numChannels; channel++) {
+      const channelData = buffer.getChannelData(channel);
+      for (let i = 0; i < frameCount; i++) {
+        channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      }
+    }
+    return buffer;
 }
 
 // --- VISUALIZATION COMPONENTS ---
@@ -429,20 +460,94 @@ const CompareRenderer: React.FC<{ data: CompareResult }> = ({ data }) => {
 // --- MAIN EXPORT ---
 
 export const ResultsSection: React.FC<ResultsSectionProps> = ({ data }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [audioSource, setAudioSource] = useState<AudioBufferSourceNode | null>(null);
+
+  const handlePlayAudio = async () => {
+      if (isPlaying) {
+          audioSource?.stop();
+          setIsPlaying(false);
+          return;
+      }
+
+      try {
+          setIsGeneratingAudio(true);
+          // Construct a comprehensive summary text
+          let summaryText = "";
+          if (data.mode === 'audit') {
+              const d = data as AuditResult;
+              summaryText = `Here is the audit for ${d.overview.page_intent}. Strategy: ${d.overview.strategic_analysis}. Key Gaps: ${d.messaging_gaps.map(g => g.title).join(", ")}. Recommendation: ${d.overview.recommendations[0]}`;
+          } else if (data.mode === 'idea') {
+              const d = data as IdeaResult;
+              summaryText = `Here is the GTM strategy for your idea. Problem: ${d.opportunity_scan.problem_summary}. Narrative: ${d.positioning.narrative}. Launch plan starts with ${d.launch_plan[0].content}`;
+          } else {
+              const d = data as CompareResult;
+              summaryText = `Comparison verdict: ${d.verdict}. Winner: ${d.scoreboard.find(s => s.winner === 'A') ? "You have some wins." : "Tough competition."}. Social sentiment is ${d.social_intel.sentiment_analysis}.`;
+          }
+
+          const base64Audio = await generateStrategyAudio(summaryText);
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
+          const audioBuffer = await decodeAudioData(
+              decode(base64Audio),
+              audioContext,
+              24000,
+              1
+          );
+
+          const source = audioContext.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioContext.destination);
+          source.onended = () => setIsPlaying(false);
+          source.start();
+          setAudioSource(source);
+          setIsPlaying(true);
+
+      } catch (e) {
+          console.error("Audio playback failed", e);
+          alert("Could not generate audio brief.");
+      } finally {
+          setIsGeneratingAudio(false);
+      }
+  };
+
   return (
     <>
-      <div className="bg-white border-l-4 border-indigo-600 p-6 rounded-r-lg shadow-md mb-8">
-        <h3 className="flex items-center gap-2 text-indigo-900 font-bold uppercase tracking-wider text-xs mb-3">
-          <BrainCircuit size={16} /> Strategic Reasoning
-        </h3>
-        <ul className="space-y-2">
-            {data.reasoning_log.map((step, i) => (
-                <li key={i} className="flex gap-3 text-sm">
-                    <span className="text-indigo-500 font-mono text-xs opacity-70 mt-0.5">0{i+1}</span>
-                    <span className="text-slate-600 leading-snug">{step}</span>
-                </li>
-            ))}
-        </ul>
+      <div className="bg-white border-l-4 border-indigo-600 p-6 rounded-r-lg shadow-md mb-8 flex justify-between items-start">
+        <div className="flex-1">
+            <h3 className="flex items-center gap-2 text-indigo-900 font-bold uppercase tracking-wider text-xs mb-3">
+            <BrainCircuit size={16} /> Strategic Reasoning
+            </h3>
+            <ul className="space-y-2">
+                {data.reasoning_log.map((step, i) => (
+                    <li key={i} className="flex gap-3 text-sm">
+                        <span className="text-indigo-500 font-mono text-xs opacity-70 mt-0.5">0{i+1}</span>
+                        <span className="text-slate-600 leading-snug">{step}</span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+        <button 
+            onClick={handlePlayAudio}
+            disabled={isGeneratingAudio}
+            className={`ml-6 flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide transition-all shadow-sm ${
+                isPlaying 
+                ? "bg-rose-100 text-rose-600 hover:bg-rose-200 border border-rose-200"
+                : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200"
+            }`}
+        >
+            {isGeneratingAudio ? (
+                <Loader2 size={16} className="animate-spin" />
+            ) : isPlaying ? (
+                <>
+                    <StopCircle size={16} /> Stop Brief
+                </>
+            ) : (
+                <>
+                    <PlayCircle size={16} /> Audio Brief
+                </>
+            )}
+        </button>
       </div>
 
       {data.mode === 'audit' && <AuditRenderer data={data as AuditResult} />}
