@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
-import { Play, Sparkles, Search, Lightbulb, Scale, ImagePlus, X, Video, Mic, StopCircle, Loader2 } from 'lucide-react';
-import { AppMode } from '../types';
+import { Play, Sparkles, Search, Lightbulb, Scale, ImagePlus, X, Video, Mic, StopCircle, Loader2, Check, Plus } from 'lucide-react';
+import { AppMode, MediaItem } from '../types';
 import { transcribeAudio } from '../services/geminiService';
 
 interface InputSectionProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
-  inputs: { a: string; b: string; image?: string; video?: string };
-  setInputs: (inputs: { a: string; b: string; image?: string; video?: string }) => void;
+  inputs: { a: string; b: string; mediaA: MediaItem[]; mediaB: MediaItem[] };
+  setInputs: (inputs: { a: string; b: string; mediaA: MediaItem[]; mediaB: MediaItem[] }) => void;
   onAnalyze: () => void;
   isLoading: boolean;
   onDemo: () => void;
@@ -22,8 +22,6 @@ export const InputSection: React.FC<InputSectionProps> = ({
   isLoading,
   onDemo
 }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -32,43 +30,56 @@ export const InputSection: React.FC<InputSectionProps> = ({
     setInputs({ ...inputs, [key]: value });
   };
 
-  // --- Image Handling ---
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              setInputs({ ...inputs, image: reader.result as string });
-          };
-          reader.readAsDataURL(file);
+  const handleModeSwitch = (newMode: AppMode) => {
+    if (mode === newMode) return;
+    setMode(newMode);
+    // Reset inputs when switching modes
+    setInputs({ a: '', b: '', mediaA: [], mediaB: [] });
+  };
+
+  // --- Multiple Media Handling ---
+  const handleMediaUpload = (
+      e: React.ChangeEvent<HTMLInputElement>, 
+      variant: 'A' | 'B'
+  ) => {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+          const newItems: MediaItem[] = [];
+          const promises = Array.from(files).map((file: File) => {
+              return new Promise<void>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                      const type = file.type.startsWith('video') ? 'video' : 'image';
+                      newItems.push({
+                          id: Math.random().toString(36).substr(2, 9),
+                          type,
+                          data: reader.result as string
+                      });
+                      resolve();
+                  };
+                  reader.readAsDataURL(file);
+              });
+          });
+
+          Promise.all(promises).then(() => {
+              if (variant === 'A') {
+                  setInputs({ ...inputs, mediaA: [...inputs.mediaA, ...newItems] });
+              } else {
+                  setInputs({ ...inputs, mediaB: [...inputs.mediaB, ...newItems] });
+              }
+              // Reset input value to allow re-uploading same file
+              e.target.value = '';
+          });
       }
   };
 
-  const removeImage = () => {
-      setInputs({ ...inputs, image: undefined });
-      if (fileInputRef.current) {
-          fileInputRef.current.value = "";
+  const removeMedia = (variant: 'A' | 'B', id: string) => {
+      if (variant === 'A') {
+          setInputs({ ...inputs, mediaA: inputs.mediaA.filter(item => item.id !== id) });
+      } else {
+          setInputs({ ...inputs, mediaB: inputs.mediaB.filter(item => item.id !== id) });
       }
   };
-
-  // --- Video Handling ---
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-              setInputs({ ...inputs, video: reader.result as string });
-          };
-          reader.readAsDataURL(file);
-      }
-  }
-
-  const removeVideo = () => {
-      setInputs({ ...inputs, video: undefined });
-      if (videoInputRef.current) {
-          videoInputRef.current.value = "";
-      }
-  }
 
   // --- Audio Recording & Transcription ---
   const startRecording = async () => {
@@ -122,9 +133,53 @@ export const InputSection: React.FC<InputSectionProps> = ({
   };
 
   const getModeDescription = () => {
-    if (mode === 'audit') return "Paste a landing page URL or raw copy. Upload a screenshot or video scan for visual analysis.";
+    if (mode === 'audit') return "Paste a landing page URL or raw copy. Upload screenshots or video scans for visual analysis.";
     if (mode === 'idea') return "Describe your product idea. Upload sketches, reference images, or demo videos.";
     return "Compare your product (Variant A) against competitors (Variant B). Upload visuals to compare design.";
+  };
+
+  // --- Small Grid Component ---
+  const MediaGrid = ({ items, onUpload, onRemove }: { items: MediaItem[], onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void, onRemove: (id: string) => void }) => {
+      const inputRef = useRef<HTMLInputElement>(null);
+      
+      return (
+          <div className="flex flex-wrap gap-2 items-center">
+              {items.map((item) => (
+                  <div key={item.id} className="relative group w-10 h-10">
+                      {item.type === 'image' ? (
+                          <img src={item.data} className="w-full h-full rounded-md object-cover border border-slate-300 shadow-sm" alt="Thumbnail" />
+                      ) : (
+                          <div className="w-full h-full rounded-md bg-slate-800 flex items-center justify-center border border-slate-300 shadow-sm">
+                              <Play size={12} className="text-white" />
+                          </div>
+                      )}
+                      <button 
+                          onClick={() => onRemove(item.id)}
+                          className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      >
+                          <X size={10} />
+                      </button>
+                  </div>
+              ))}
+              
+              <button 
+                  onClick={() => inputRef.current?.click()}
+                  className="w-8 h-8 flex items-center justify-center rounded-md bg-white border border-dashed border-slate-300 text-slate-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50 transition-all shadow-sm"
+                  title="Add Image or Video"
+              >
+                  <Plus size={16} />
+              </button>
+              <input 
+                  type="file" 
+                  ref={inputRef} 
+                  className="hidden" 
+                  accept="image/*,video/*"
+                  multiple
+                  onChange={onUpload}
+                  disabled={isLoading}
+              />
+          </div>
+      );
   };
 
   return (
@@ -132,7 +187,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
       {/* Mode Selector */}
       <div className="bg-white rounded-t-xl border-t border-x border-slate-200 p-2 grid grid-cols-3 gap-1 shadow-sm z-10">
         <button
-           onClick={() => setMode('audit')}
+           onClick={() => handleModeSwitch('audit')}
            disabled={isLoading}
            className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-medium transition-all ${
              mode === 'audit' ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'
@@ -141,7 +196,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
            <Search size={18} className="mb-1" /> Page Audit
         </button>
         <button
-           onClick={() => setMode('idea')}
+           onClick={() => handleModeSwitch('idea')}
            disabled={isLoading}
            className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-medium transition-all ${
              mode === 'idea' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'
@@ -150,7 +205,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
            <Lightbulb size={18} className="mb-1" /> Idea & GTM
         </button>
         <button
-           onClick={() => setMode('compare')}
+           onClick={() => handleModeSwitch('compare')}
            disabled={isLoading}
            className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg text-xs font-medium transition-all ${
              mode === 'compare' ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'
@@ -184,23 +239,39 @@ export const InputSection: React.FC<InputSectionProps> = ({
              </button>
         </div>
 
-        <div className="flex-grow space-y-4 overflow-y-auto">
+        <div className="flex-grow space-y-6 overflow-y-auto">
             {mode === 'compare' ? (
                 <>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Variant A (My Product)</label>
+                    {/* Variant A */}
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-bold text-slate-700 uppercase">Variant A (My Product)</label>
+                            <MediaGrid 
+                                items={inputs.mediaA} 
+                                onUpload={(e) => handleMediaUpload(e, 'A')}
+                                onRemove={(id) => removeMedia('A', id)}
+                            />
+                        </div>
                         <textarea
-                            className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
+                            className="w-full h-24 p-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
                             placeholder="Paste your copy..."
                             value={inputs.a}
                             onChange={(e) => handleInputChange('a', e.target.value)}
                             disabled={isLoading}
                         />
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Variant B (Competitors)</label>
+                    {/* Variant B */}
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-bold text-slate-700 uppercase">Variant B (Competitors)</label>
+                             <MediaGrid 
+                                items={inputs.mediaB} 
+                                onUpload={(e) => handleMediaUpload(e, 'B')}
+                                onRemove={(id) => removeMedia('B', id)}
+                            />
+                        </div>
                         <textarea
-                            className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
+                            className="w-full h-24 p-3 bg-white border border-slate-200 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none"
                             placeholder="Paste one or more competitors (URLs or text)..."
                             value={inputs.b}
                             onChange={(e) => handleInputChange('b', e.target.value)}
@@ -209,82 +280,30 @@ export const InputSection: React.FC<InputSectionProps> = ({
                     </div>
                 </>
             ) : (
-                <textarea
-                    className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all resize-none text-slate-800 text-sm font-mono leading-relaxed"
-                    placeholder={mode === 'audit' ? "e.g. https://mysaas.com\nOR paste raw text..." : "e.g. 'I want to build an AI app for dog walkers...'"}
-                    value={inputs.a}
-                    onChange={(e) => handleInputChange('a', e.target.value)}
-                    disabled={isLoading}
-                />
+                <div className="flex flex-col h-full">
+                    <textarea
+                        className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all resize-none text-slate-800 text-sm font-mono leading-relaxed mb-4"
+                        placeholder={mode === 'audit' ? "e.g. https://mysaas.com\nOR paste raw text..." : "e.g. 'I want to build an AI app for dog walkers...'"}
+                        value={inputs.a}
+                        onChange={(e) => handleInputChange('a', e.target.value)}
+                        disabled={isLoading}
+                    />
+                    
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                         <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-bold text-slate-500 uppercase">Media Attachments</label>
+                            <span className="text-[10px] text-slate-400">Images & Videos supported</span>
+                         </div>
+                         <div className="min-h-[60px] flex items-center">
+                            <MediaGrid 
+                                items={inputs.mediaA} 
+                                onUpload={(e) => handleMediaUpload(e, 'A')}
+                                onRemove={(id) => removeMedia('A', id)}
+                            />
+                         </div>
+                    </div>
+                </div>
             )}
-
-            {/* Media Upload Area */}
-            <div className="flex gap-4 mt-2">
-                {/* Image Upload */}
-                <div className="flex-1">
-                     {!inputs.image ? (
-                        <div 
-                            onClick={() => fileInputRef.current?.click()}
-                            className="h-32 border-2 border-dashed border-slate-200 rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 hover:border-indigo-300 transition-all group"
-                        >
-                            <ImagePlus className="text-slate-400 group-hover:text-indigo-500 mb-2" size={24} />
-                            <span className="text-xs text-slate-500 font-medium">Add Image</span>
-                            <input 
-                                type="file" 
-                                ref={fileInputRef} 
-                                className="hidden" 
-                                accept="image/*"
-                                onChange={handleImageUpload}
-                                disabled={isLoading}
-                            />
-                        </div>
-                    ) : (
-                        <div className="relative h-32 border border-slate-200 rounded-lg overflow-hidden group bg-slate-50 flex items-center justify-center">
-                            <img src={inputs.image} alt="Upload preview" className="h-full w-auto object-cover" />
-                            <button 
-                                onClick={removeImage}
-                                className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 hover:bg-red-500 transition-colors"
-                            >
-                                <X size={14} />
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                {/* Video Upload */}
-                <div className="flex-1">
-                    {!inputs.video ? (
-                        <div 
-                            onClick={() => videoInputRef.current?.click()}
-                            className="h-32 border-2 border-dashed border-slate-200 rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 hover:border-indigo-300 transition-all group"
-                        >
-                            <Video className="text-slate-400 group-hover:text-indigo-500 mb-2" size={24} />
-                            <span className="text-xs text-slate-500 font-medium">Add Video</span>
-                            <input 
-                                type="file" 
-                                ref={videoInputRef} 
-                                className="hidden" 
-                                accept="video/*"
-                                onChange={handleVideoUpload}
-                                disabled={isLoading}
-                            />
-                        </div>
-                    ) : (
-                         <div className="relative h-32 border border-slate-200 rounded-lg overflow-hidden group bg-slate-900 flex items-center justify-center">
-                            <video src={inputs.video} className="h-full w-auto" />
-                            <button 
-                                onClick={removeVideo}
-                                className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 hover:bg-red-500 transition-colors z-10"
-                            >
-                                <X size={14} />
-                            </button>
-                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                <Play size={24} className="text-white opacity-50" />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
         </div>
 
         <div className="mt-4 space-y-3">

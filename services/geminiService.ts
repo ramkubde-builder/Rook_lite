@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { SYSTEM_INSTRUCTION_BASE } from "../constants";
-import { AnalysisResult, AppMode } from "../types";
+import { AnalysisResult, AppMode, MediaItem } from "../types";
 
 // --- Shared Sub-Schemas ---
 const adSchema = {
@@ -31,6 +31,16 @@ const emailSchema = {
     body: { type: Type.STRING },
   },
   required: ["subject_line", "preview_text", "body"],
+};
+
+const seoSuggestionSchema = {
+    type: Type.OBJECT,
+    properties: {
+        current: { type: Type.STRING, description: "The current value found or 'None' if missing." },
+        suggested: { type: Type.STRING, description: "An optimized version for better SEO and CTR." },
+        reasoning: { type: Type.STRING, description: "Why this improvement helps." }
+    },
+    required: ["current", "suggested", "reasoning"]
 };
 
 // --- Mode 1: Audit Schema ---
@@ -85,9 +95,17 @@ const auditSchema: Schema = {
     seo: {
       type: Type.OBJECT,
       properties: {
-        title_tag: { type: Type.STRING },
-        meta_description: { type: Type.STRING },
-        focus_keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+        title_tag: seoSuggestionSchema,
+        meta_description: seoSuggestionSchema,
+        focus_keywords: {
+            type: Type.OBJECT,
+            properties: {
+                current: { type: Type.ARRAY, items: { type: Type.STRING } },
+                suggested: { type: Type.ARRAY, items: { type: Type.STRING } },
+                reasoning: { type: Type.STRING }
+            },
+            required: ["current", "suggested", "reasoning"]
+        },
       },
       required: ["title_tag", "meta_description", "focus_keywords"]
     },
@@ -252,7 +270,7 @@ const compareSchema: Schema = {
 
 export const analyzeMarketingContent = async (
   mode: AppMode,
-  inputs: { a: string, b: string, image?: string, video?: string }
+  inputs: { a: string, b: string, mediaA: MediaItem[], mediaB: MediaItem[] }
 ): Promise<AnalysisResult> => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
@@ -263,70 +281,91 @@ export const analyzeMarketingContent = async (
 
   let prompt = "";
   let schema: Schema;
+  const parts: any[] = [];
+
+  // Helper to append media part from items
+  const appendMediaItems = (items: MediaItem[]) => {
+      items.forEach(item => {
+        // Check image
+        let match = item.data.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+        if (match) {
+            parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+            return;
+        }
+        // Check video
+        match = item.data.match(/^data:(video\/[a-z0-9]+);base64,(.+)$/);
+        if (match) {
+            parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+            return;
+        }
+      });
+  };
+
+  const hasImage = inputs.mediaA.some(m => m.type === 'image');
+  const hasVideo = inputs.mediaA.some(m => m.type === 'video');
 
   if (mode === 'audit') {
     prompt = `Perform a deep conversion audit on the following landing page content.
     INPUT: "${inputs.a}"
-    ${inputs.image ? "NOTE: An image of the landing page or ad has been provided. Analyze its visual hierarchy, design trust signals, and alignment with the copy." : ""}
-    ${inputs.video ? "NOTE: A video of the landing page or user flow has been provided. Analyze the user experience, motion design, and video content effectiveness." : ""}
-    Provide strategic reasoning, find gaps (with severity), rewrite copy, and suggest ads.
+    ${hasImage ? "NOTE: Image(s) of the landing page or ad have been provided. Analyze visual hierarchy, design trust signals, and alignment with the copy." : ""}
+    ${hasVideo ? "NOTE: Video(s) of the landing page or user flow have been provided. Analyze user experience, motion design, and video content effectiveness." : ""}
+    
+    TASKS:
+    1. Provide strategic reasoning, find gaps (with severity).
+    2. Rewrite copy (headline, subhead, CTAs).
+    3. Analyze SEO: Identify current title/meta (or say 'None' if missing), provide AI-optimized suggestions, and explain the reasoning. Suggest focus keywords.
+    4. Suggest ad concepts.
+    
     If the input contains URLs, use Google Search to gather context about the brand if needed.`;
     schema = auditSchema;
+    
+    appendMediaItems(inputs.mediaA);
+    parts.push({ text: prompt });
+
   } else if (mode === 'idea') {
     prompt = `Act as a GTM strategist. I have a product idea but no website.
     IDEA INPUT: "${inputs.a}"
-    ${inputs.image ? "NOTE: A sketch or visual reference for the idea has been provided. Use it to inform the landing page structure and visual direction." : ""}
-    ${inputs.video ? "NOTE: A video explaining the idea or a prototype demo has been provided. Use the video details to refine the ICP and feature positioning." : ""}
+    ${hasImage ? "NOTE: Sketch/reference image(s) provided. Use to inform landing page structure and visual direction." : ""}
+    ${hasVideo ? "NOTE: Video(s) explaining the idea or prototype demo provided. Use details to refine ICP and feature positioning." : ""}
     Create an opportunity scan, ICP, positioning, landing page structure, channel strategy, and launch plan.
     Use Google Search to validate market trends if specific industries are mentioned.`;
     schema = ideaSchema;
+
+    appendMediaItems(inputs.mediaA);
+    parts.push({ text: prompt });
+
   } else {
-    prompt = `Compare these two marketing assets.
+    // Compare Mode - complex interleaving
+    schema = compareSchema;
     
-    VARIANT A (My Product): "${inputs.a}"
-    VARIANT B (Competitor(s)): "${inputs.b}"
-    ${inputs.image ? "NOTE: An image of Variant A (or a competitor) has been provided. Factor visual design into the scoreboard and differences analysis." : ""}
-    ${inputs.video ? "NOTE: A video of Variant A (or a competitor) has been provided. Factor video engagement and production quality into the scoreboard." : ""}
+    parts.push({ text: `Compare these two marketing assets.
     
+    VARIANT A (My Product):
+    - Text: "${inputs.a}"` });
+    
+    if (inputs.mediaA.length > 0) {
+        parts.push({ text: `- ${inputs.mediaA.length} Visual attachment(s) for Variant A attached below.` });
+        appendMediaItems(inputs.mediaA);
+    }
+
+    parts.push({ text: `\nVARIANT B (Competitor(s)):
+    - Text: "${inputs.b}"` });
+
+    if (inputs.mediaB.length > 0) {
+        parts.push({ text: `- ${inputs.mediaB.length} Visual attachment(s) for Variant B attached below.` });
+        appendMediaItems(inputs.mediaB);
+    }
+
+    parts.push({ text: `
     NOTE: Variant B may contain multiple competitors. Analyze them as a group or the strongest among them.
     
     TASKS:
     1. Provide a verdict and 0-10 scoreboard.
     2. USE GOOGLE SEARCH to research the social media presence (LinkedIn, Twitter, etc.) of the brands mentioned in the inputs.
     3. Summarize the social intelligence found (channels, sentiment).
-    4. Analyze differences and create an action plan.`;
-    schema = compareSchema;
+    4. Analyze differences and create an action plan.
+    `});
   }
-
-  const parts: any[] = [];
-  
-  if (inputs.image) {
-      // Inputs.image is expected to be a data URL (e.g. data:image/png;base64,...)
-      const match = inputs.image.match(/^data:(image\/[a-z]+);base64,(.+)$/);
-      if (match) {
-          parts.push({
-              inlineData: {
-                  mimeType: match[1],
-                  data: match[2]
-              }
-          });
-      }
-  }
-
-  if (inputs.video) {
-      // Inputs.video is expected to be a data URL
-      const match = inputs.video.match(/^data:(video\/[a-z0-9]+);base64,(.+)$/);
-      if (match) {
-          parts.push({
-              inlineData: {
-                  mimeType: match[1],
-                  data: match[2]
-              }
-          });
-      }
-  }
-
-  parts.push({ text: prompt });
 
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",

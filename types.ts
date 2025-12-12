@@ -18,10 +18,20 @@ export interface SocialPost {
   hashtags: string[];
 }
 
+export interface SeoSuggestion {
+  current: string;
+  suggested: string;
+  reasoning: string;
+}
+
 export interface SeoData {
-  title_tag: string;
-  meta_description: string;
-  focus_keywords: string[];
+  title_tag: SeoSuggestion;
+  meta_description: SeoSuggestion;
+  focus_keywords: {
+    current: string[];
+    suggested: string[];
+    reasoning: string;
+  };
 }
 
 export interface EmailDraft {
@@ -136,13 +146,24 @@ export interface CompareResult {
 
 export type AnalysisResult = AuditResult | IdeaResult | CompareResult;
 
+export interface MediaItem {
+  id: string;
+  type: 'image' | 'video';
+  data: string;
+}
+
 export interface SavedAnalysis {
   id: string;
   timestamp: number;
   mode: AppMode;
   title: string;
   summary: string;
-  inputs: { a: string; b: string; image?: string; video?: string }; // Added video
+  inputs: { 
+      a: string; 
+      b: string; 
+      mediaA: MediaItem[]; 
+      mediaB: MediaItem[]; 
+  }; 
   result: AnalysisResult;
 }
 

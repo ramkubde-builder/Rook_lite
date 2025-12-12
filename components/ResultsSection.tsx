@@ -266,22 +266,77 @@ const AuditRenderer: React.FC<{ data: AuditResult }> = ({ data }) => {
 
             {/* SEO & Ads Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <AnalysisCard title="SEO" icon={<Search className="text-orange-600" />} colorClass="border-l-4 border-orange-500">
-                    <div className="space-y-3">
-                        <div>
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Title Tag</span>
-                            <div className="text-xs bg-slate-800 text-green-400 p-2 rounded font-mono mt-1">{data.seo.title_tag}</div>
+                <AnalysisCard title="SEO Analysis & Suggestions" icon={<Search className="text-orange-600" />} colorClass="border-l-4 border-orange-500">
+                    {/* Safe check for legacy format vs new format */}
+                    {data.seo && typeof data.seo.title_tag === 'object' ? (
+                         <div className="space-y-4">
+                             {/* Title Tag */}
+                             <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                  <div className="flex justify-between items-baseline mb-1">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase">Title Tag</span>
+                                      <span className="text-[10px] text-indigo-500 font-medium">Optimization</span>
+                                  </div>
+                                  {data.seo.title_tag.current && data.seo.title_tag.current !== 'None' && (
+                                      <div className="mb-2 opacity-60">
+                                          <span className="text-[10px] text-slate-400 mr-2">CURRENT:</span>
+                                          <span className="text-xs text-slate-600 line-through">{data.seo.title_tag.current}</span>
+                                      </div>
+                                  )}
+                                  <div className="text-sm font-bold text-slate-800">{data.seo.title_tag.suggested}</div>
+                                  <p className="text-[10px] text-slate-500 mt-1 italic border-l-2 border-indigo-200 pl-2">
+                                      {data.seo.title_tag.reasoning}
+                                  </p>
+                             </div>
+
+                             {/* Meta Description */}
+                             <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                  <div className="flex justify-between items-baseline mb-1">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase">Meta Description</span>
+                                      <span className="text-[10px] text-indigo-500 font-medium">Optimization</span>
+                                  </div>
+                                   {data.seo.meta_description.current && data.seo.meta_description.current !== 'None' && (
+                                      <div className="mb-2 opacity-60">
+                                          <span className="text-[10px] text-slate-400 mr-2">CURRENT:</span>
+                                          <span className="text-xs text-slate-600 line-through">{data.seo.meta_description.current}</span>
+                                      </div>
+                                  )}
+                                  <div className="text-xs text-slate-700 leading-relaxed">{data.seo.meta_description.suggested}</div>
+                                  <p className="text-[10px] text-slate-500 mt-1 italic border-l-2 border-indigo-200 pl-2">
+                                      {data.seo.meta_description.reasoning}
+                                  </p>
+                             </div>
+
+                             {/* Keywords */}
+                              <div>
+                                 <span className="text-[10px] font-bold text-slate-400 uppercase block mb-2">Focus Keywords</span>
+                                 <div className="flex flex-wrap gap-2 mb-2">
+                                     {data.seo.focus_keywords.suggested.map((kw, i) => (
+                                         <span key={i} className="bg-orange-50 text-orange-700 px-2 py-1 rounded-full text-[10px] font-bold border border-orange-100 flex items-center gap-1">
+                                             {kw}
+                                         </span>
+                                     ))}
+                                 </div>
+                                 <p className="text-[10px] text-slate-400 italic">Strategy: {data.seo.focus_keywords.reasoning}</p>
+                             </div>
+                         </div>
+                    ) : (
+                         // Fallback for older saved analysis or simpler view
+                        <div className="space-y-3">
+                            <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Title Tag</span>
+                                <div className="text-xs bg-slate-800 text-green-400 p-2 rounded font-mono mt-1">{(data.seo as any).title_tag}</div>
+                            </div>
+                            <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Meta Desc</span>
+                                <div className="text-xs text-slate-600 mt-1 leading-relaxed">{(data.seo as any).meta_description}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 pt-2">
+                                {(data.seo as any).focus_keywords && Array.isArray((data.seo as any).focus_keywords) && (data.seo as any).focus_keywords.map((kw: string, i: number) => (
+                                    <span key={i} className="bg-orange-50 text-orange-700 px-2 py-1 rounded-full text-[10px] font-bold border border-orange-100">{kw}</span>
+                                ))}
+                            </div>
                         </div>
-                        <div>
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Meta Desc</span>
-                            <div className="text-xs text-slate-600 mt-1 leading-relaxed">{data.seo.meta_description}</div>
-                        </div>
-                        <div className="flex flex-wrap gap-2 pt-2">
-                            {data.seo.focus_keywords.map((kw, i) => (
-                                <span key={i} className="bg-orange-50 text-orange-700 px-2 py-1 rounded-full text-[10px] font-bold border border-orange-100">{kw}</span>
-                            ))}
-                        </div>
-                    </div>
+                    )}
                 </AnalysisCard>
                 <AnalysisCard title="Ads" icon={<Megaphone className="text-purple-600" />} colorClass="border-l-4 border-purple-500">
                      <div className="space-y-4">

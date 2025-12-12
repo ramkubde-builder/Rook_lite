@@ -4,27 +4,26 @@ import { InputSection } from './components/InputSection';
 import { ResultsSection } from './components/ResultsSection';
 import { LoadingState } from './components/LoadingState';
 import { SavedAnalysesPanel } from './components/SavedAnalysesPanel';
-import { AnalysisResult, AppMode, SavedAnalysis } from './types';
+import { AnalysisResult, AppMode, SavedAnalysis, MediaItem } from './types';
 import { analyzeMarketingContent } from './services/geminiService';
 import { DEMO_CONTENT } from './constants';
 
 const RookLogo = () => (
-  <svg 
-    width="32" 
-    height="32" 
-    viewBox="0 0 24 24" 
-    fill="currentColor" 
-    xmlns="http://www.w3.org/2000/svg"
-    className="text-indigo-600"
-  >
-    <path d="M5 20H19V22H5V20ZM17 2H15V5H13V2H11V5H9V2H7V7H17V2ZM7 8H17L15.5 18H8.5L7 8Z" />
-    <path d="M6 19H18V21H6V19Z" fill="currentColor" />
-  </svg>
+  <img 
+    src="https://img.icons8.com/ios-filled/100/4f46e5/rook.png" 
+    alt="Rook Logo" 
+    className="w-8 h-8"
+  />
 );
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('audit');
-  const [inputs, setInputs] = useState<{ a: string; b: string; image?: string; video?: string }>({ a: '', b: '' });
+  const [inputs, setInputs] = useState<{ a: string; b: string; mediaA: MediaItem[]; mediaB: MediaItem[] }>({ 
+      a: '', 
+      b: '', 
+      mediaA: [], 
+      mediaB: [] 
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +37,17 @@ const App: React.FC = () => {
     const stored = localStorage.getItem('rook_lite_history');
     if (stored) {
         try {
-            setSavedItems(JSON.parse(stored));
+            const parsed = JSON.parse(stored);
+            // Simple migration check: ensure media arrays exist if old data is loaded
+            const migrated = parsed.map((item: any) => ({
+                ...item,
+                inputs: {
+                    ...item.inputs,
+                    mediaA: item.inputs.mediaA || [],
+                    mediaB: item.inputs.mediaB || []
+                }
+            }));
+            setSavedItems(migrated);
         } catch (e) {
             console.error("Failed to load history", e);
         }
@@ -46,7 +55,7 @@ const App: React.FC = () => {
   }, []);
 
   // Save history handler
-  const saveToHistory = (result: AnalysisResult, currentInputs: { a: string, b: string, image?: string, video?: string }) => {
+  const saveToHistory = (result: AnalysisResult, currentInputs: { a: string; b: string; mediaA: MediaItem[]; mediaB: MediaItem[] }) => {
       const newItem: SavedAnalysis = {
           id: Date.now().toString(),
           timestamp: Date.now(),
@@ -108,9 +117,9 @@ const App: React.FC = () => {
   };
 
   const loadDemo = () => {
-    if (mode === 'audit') setInputs({ a: DEMO_CONTENT.audit, b: '' });
-    else if (mode === 'idea') setInputs({ a: DEMO_CONTENT.idea, b: '' });
-    else setInputs({ a: DEMO_CONTENT.compareA, b: DEMO_CONTENT.compareB });
+    if (mode === 'audit') setInputs({ a: DEMO_CONTENT.audit, b: '', mediaA: [], mediaB: [] });
+    else if (mode === 'idea') setInputs({ a: DEMO_CONTENT.idea, b: '', mediaA: [], mediaB: [] });
+    else setInputs({ a: DEMO_CONTENT.compareA, b: DEMO_CONTENT.compareB, mediaA: [], mediaB: [] });
     setError(null);
   };
 
